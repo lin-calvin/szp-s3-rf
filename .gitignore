@@ -1,0 +1,7 @@
+.pio/
+.venv/
+sdkconfig.szp-s3-rf
+*.bin
+*.elf
+*.map
+dependencies.lock
