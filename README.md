@@ -18,9 +18,14 @@
 
 ## 构建与烧录
 
-用 PlatformIO 的 `espidf` 框架（自动下载 **ESP-IDF 5.2.1**）。因为系统 python 升到 3.14 后 `~/.platformio/penv` 已损坏，这里用项目內的 uv 环境：
+用 PlatformIO 的 `espidf` 框架（自动下载 **ESP-IDF 5.2.1**）。LVGL 8.3.9 以 **git submodule** 形式放在
+`components/lvgl`，记得带 submodule 克隆（或事后 `git submodule update --init`）。
+
+因为系统 python 升到 3.14 后 `~/.platformio/penv` 已损坏，这里用项目内的 uv 环境：
 
 ```sh
+git clone --recurse-submodules https://github.com/lin-calvin/szp-s3-rf.git
+cd szp-s3-rf
 uv venv --python /usr/bin/python3.13 .venv
 uv pip install --python .venv/bin/python platformio
 .venv/bin/pio run -t upload        # 串口默认 /dev/ttyACM0
