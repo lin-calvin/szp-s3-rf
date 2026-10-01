@@ -22,6 +22,10 @@ const uint32_t *s3_iq_words(void);
 unsigned s3_frequency_mhz(void);
 void s3_set_frequency_mhz(unsigned mhz);
 
+/* Light retune for sweeps: only moves the PLL/channel, keeping the RX path
+ * set up by the last full prepare_rx(). Much faster than s3_set_frequency_mhz. */
+void s3_retune_mhz(unsigned mhz);
+
 /* Approximate analog receive bandwidth in MHz; 0 selects the widest setting. */
 void s3_set_bandwidth_mhz(unsigned mhz);
 

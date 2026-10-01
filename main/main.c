@@ -16,6 +16,9 @@
 #include "ui.h"
 
 #define FFT_MAX       1024
+/* FFT size used for sweeps (overview resolution is coarse, so keep it small
+ * to make the sweep fast; independent of the spectrum N button). */
+#define SWEEP_N       256
 #define FFT_RATE_DIV  1   /* 0 = 80, 1 = 40, 6 = 16 MS/s */
 #define FFT_RATE_MSPS 40
 
@@ -83,8 +86,8 @@ static void act_cycle_view(void)
 /* Sweep [start,stop] MHz with 40 MHz windows, max-hold into 320 bins. */
 static void sweep_window(int c, int n, float bin_mhz, int start, int stop, float *ovw)
 {
-    s3_set_frequency_mhz((unsigned)c);
-    esp_rom_delay_us(200);            /* PLL settle */
+    s3_retune_mhz((unsigned)c);       /* light retune: just move the PLL */
+    esp_rom_delay_us(100);            /* PLL settle */
     static float spec[FFT_MAX];
     if (!s3_rf_capture(n, FFT_RATE_DIV)) return;
     dsp_fft_iq(s3_iq_words(), spec);
@@ -96,7 +99,7 @@ static void sweep_window(int c, int n, float bin_mhz, int start, int stop, float
     }
 }
 
-static void sweep_once(int view, float *ovw)
+static void sweep_once(int view, float *ovw, int n)
 {
     int start = (view == 1) ? 2400 : 100;
     int stop = (view == 1) ? 2484 : 3000;
@@ -104,8 +107,7 @@ static void sweep_once(int view, float *ovw)
     /* Small step: every frequency must fall in the flat middle of some window,
      * otherwise the DC-removal notch at each window centre shows as a dark
      * stripe (and the window edges are rolled off by the analog filter). */
-    const int step = 10;
-    int n = g_fft_n;
+    const int step = 20;
     float bin_mhz = (float)FFT_RATE_MSPS / (float)n;
     static float filled[OVW_BINS];
     if (dsp_fft_size() != n) return;
@@ -144,7 +146,7 @@ static void capture_task(void *arg)
 
     for (;;) {
         s3_cli_poll();
-        int n = g_fft_n;
+        int n = (g_view == 0) ? g_fft_n : SWEEP_N;
         if (n != applied_n && dsp_fft_init(n) == 0) {
             applied_n = n;
         }
@@ -166,7 +168,7 @@ static void capture_task(void *arg)
         } else {
             if (!s3_host_active()) {
                 int view = g_view;
-                sweep_once(view, ovw);
+                sweep_once(view, ovw, n);
                 if (g_view == view) {
                     xSemaphoreTake(s_spec_lock, portMAX_DELAY);
                     memcpy(s_ovw_shared, ovw, sizeof(ovw));
@@ -174,7 +176,7 @@ static void capture_task(void *arg)
                     xSemaphoreGive(s_spec_lock);
                 }
             }
-            vTaskDelay(pdMS_TO_TICKS(30));
+            vTaskDelay(pdMS_TO_TICKS(5));
         }
     }
 }

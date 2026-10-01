@@ -325,6 +325,17 @@ void s3_set_frequency_mhz(unsigned mhz) {
     frequency_mhz=mhz;rx_ready=false;prepare_rx();
     if(rf_lock)xSemaphoreGive(rf_lock);
 }
+
+void s3_retune_mhz(unsigned mhz) {
+    if(rf_lock)xSemaphoreTake(rf_lock,portMAX_DELAY);
+    frequency_mhz=mhz;
+    bool channel=(mhz>=2412 && mhz<=2472 && (mhz-2412)%5==0)||mhz==2484;
+    /* Skip the set_chanfreq(2412) preamble the stock path uses for out-of-band:
+     * only move the PLL. The RX path was set up by the last prepare_rx(). */
+    if(channel)set_chanfreq(mhz,0);
+    else set_rf_freq_offset(0,mhz,0);
+    if(rf_lock)xSemaphoreGive(rf_lock);
+}
 void s3_set_bandwidth_mhz(unsigned mhz) { rx_filter=(int)rx_bandwidth_dcap(mhz); }
 
 unsigned s3_gain_max(void) { return gain_max(); }
