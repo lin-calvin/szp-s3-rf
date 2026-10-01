@@ -369,8 +369,8 @@ void ui_set_view(int view)
     lv_label_set_text(s_lbl_mode, nm);
     apply_visibility();
     if (view != 0) {
-        int lo = view == 1 ? 2400 : 100;
-        int hi = view == 1 ? 2484 : 3000;
+        int lo = view == 1 ? 2200 : 100;
+        int hi = view == 1 ? 2700 : 3000;
         char b[20];
         snprintf(b, sizeof(b), "%d", lo);
         lv_label_set_text(s_ax_left, b);

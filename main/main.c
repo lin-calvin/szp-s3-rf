@@ -81,6 +81,9 @@ static void act_cycle_view(void)
 {
     g_view = (g_view + 1) % 3;
     ui_set_view(g_view);
+    /* Sweeps: match the analog filter to the 40 MS/s digital span (40 MHz) to
+     * keep out-of-band signals from aliasing in. Normal view: widest. */
+    s3_set_bandwidth_mhz(g_view == 0 ? 0 : 40);
 }
 
 /* Sweep [start,stop] MHz with 40 MHz windows, max-hold into 320 bins. */
@@ -101,8 +104,8 @@ static void sweep_window(int c, int n, float bin_mhz, int start, int stop, float
 
 static void sweep_once(int view, float *ovw, int n)
 {
-    int start = (view == 1) ? 2400 : 100;
-    int stop = (view == 1) ? 2484 : 3000;
+    int start = (view == 1) ? 2200 : 100;
+    int stop = (view == 1) ? 2700 : 3000;
     const int span = 40;
     /* Small step: every frequency must fall in the flat middle of some window,
      * otherwise the DC-removal notch at each window centre shows as a dark
@@ -325,7 +328,7 @@ void app_main(void)
 
 #if SZP_RF_ENABLE
     s3_rf_init();
-    s3_set_bandwidth_mhz(0);   /* widest analog bandwidth */
+    s3_set_bandwidth_mhz(0);   /* widest for the normal view */
     xTaskCreatePinnedToCore(capture_task, "capture", 8192, NULL, 4, NULL, CAPTURE_CORE);
 #endif
     xTaskCreatePinnedToCore(ui_task, "ui", 8192, NULL, 5, NULL, UI_CORE);
