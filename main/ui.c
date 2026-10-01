@@ -26,9 +26,13 @@ static lv_obj_t *s_title;
 static lv_obj_t *s_lbl_n;
 static lv_obj_t *s_lbl_g;
 static lv_obj_t *s_lbl_f;
+static lv_obj_t *s_lbl_mode;
 static lv_obj_t *s_ax_left;
 static lv_obj_t *s_ax_mid;
 static lv_obj_t *s_ax_right;
+static lv_obj_t *s_ovw_chart;
+static lv_chart_series_t *s_ovw_ser;
+static int s_view;   /* 0=40mhz, 1=ism, 2=overview */
 
 static lv_obj_t *s_kp;        /* keypad overlay */
 static lv_obj_t *s_kp_val;    /* typed value */
@@ -107,6 +111,7 @@ static void title_cb(lv_event_t *e) { (void)e; kp_open(); }
 static void n_cb(lv_event_t *e) { (void)e; if (s_act.cycle_n) s_act.cycle_n(); }
 static void g_cb(lv_event_t *e) { (void)e; if (s_act.toggle_gain) s_act.toggle_gain(); }
 static void f_cb(lv_event_t *e) { (void)e; if (s_act.cycle_fps) s_act.cycle_fps(); }
+static void mode_cb(lv_event_t *e) { (void)e; if (s_act.cycle_view) s_act.cycle_view(); }
 
 static lv_obj_t *mk_btn(lv_obj_t *parent, const char *txt, int x, int y, int w, int h,
                         lv_event_cb_t cb, void *ud)
@@ -273,12 +278,35 @@ void ui_init(void)
 
     /* Tappable status buttons. */
     lv_obj_t *b;
-    b = mk_btn(scr, "N:512", 4, 190, 100, 26, n_cb, NULL);
+    b = mk_btn(scr, "N 512", 2, 190, 76, 26, n_cb, NULL);
     s_lbl_n = lv_obj_get_child(b, 0);
-    b = mk_btn(scr, "G:AGC", 110, 190, 100, 26, g_cb, NULL);
+    b = mk_btn(scr, "AGC", 82, 190, 76, 26, g_cb, NULL);
     s_lbl_g = lv_obj_get_child(b, 0);
-    b = mk_btn(scr, "FPS:10", 216, 190, 100, 26, f_cb, NULL);
+    b = mk_btn(scr, "10fps", 162, 190, 76, 26, f_cb, NULL);
     s_lbl_f = lv_obj_get_child(b, 0);
+    b = mk_btn(scr, "40mhz", 242, 190, 76, 26, mode_cb, NULL);
+    s_lbl_mode = lv_obj_get_child(b, 0);
+    lv_obj_set_style_text_font(s_lbl_n, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_lbl_g, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_lbl_f, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_font(s_lbl_mode, &lv_font_montserrat_10, 0);
+
+    /* Sweep overview chart (fixed absolute-frequency axis). */
+    s_ovw_chart = lv_chart_create(scr);
+    lv_obj_set_size(s_ovw_chart, PLOT_W, PLOT_H);
+    lv_obj_align(s_ovw_chart, LV_ALIGN_TOP_MID, 0, PLOT_Y);
+    lv_obj_set_style_bg_color(s_ovw_chart, lv_color_hex(0x081018), 0);
+    lv_obj_set_style_border_color(s_ovw_chart, lv_color_hex(0x2a3b4d), 0);
+    lv_obj_set_style_border_width(s_ovw_chart, 1, 0);
+    lv_obj_set_style_pad_all(s_ovw_chart, 0, 0);
+    lv_obj_set_style_line_width(s_ovw_chart, 1, LV_PART_ITEMS);
+    lv_obj_set_style_size(s_ovw_chart, 0, LV_PART_INDICATOR);
+    lv_chart_set_type(s_ovw_chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(s_ovw_chart, PLOT_W);
+    lv_chart_set_range(s_ovw_chart, LV_CHART_AXIS_PRIMARY_Y, 0, 1000);
+    lv_chart_set_div_line_count(s_ovw_chart, 8, 6);
+    s_ovw_ser = lv_chart_add_series(s_ovw_chart, lv_color_hex(0xff9040), LV_CHART_AXIS_PRIMARY_Y);
+    lv_obj_add_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
 
     s_ax_left = lv_label_create(scr);
     lv_obj_set_style_text_color(s_ax_left, lv_color_hex(0x8090a0), 0);
@@ -298,25 +326,72 @@ void ui_init(void)
 
     keypad_init(scr);
     ui_set_mode(0);
+    ui_set_view(0);
 }
 
 int ui_get_mode(void) { return s_mode; }
+int ui_get_view(void) { return s_view; }
+
+static void apply_visibility(void)
+{
+    bool chart = (s_view == 0 && s_mode == 0);
+    bool canvas = (s_view == 0 && s_mode == 1);
+    bool ovw = (s_view != 0);
+    if (s_chart) {
+        if (chart) lv_obj_clear_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_canvas) {
+        if (canvas) lv_obj_clear_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_ovw_chart) {
+        if (ovw) lv_obj_clear_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
+    }
+    s_prev_center = -1;
+}
 
 void ui_set_mode(int mode)
 {
     s_mode = mode;
-    if (mode == 1) {
-        if (s_canvas && s_wf_buf) {
-            memset(s_wf_buf + 1024, 0, (size_t)PLOT_W * PLOT_H);
-            lv_obj_invalidate(s_canvas);
-            lv_obj_clear_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
-        }
-        if (s_chart) lv_obj_add_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        if (s_canvas) lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
-        if (s_chart) lv_obj_clear_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
+    if (mode == 1 && s_wf_buf) {
+        memset(s_wf_buf + 1024, 0, (size_t)PLOT_W * PLOT_H);
+        lv_obj_invalidate(s_canvas);
     }
-    s_prev_center = -1;
+    apply_visibility();
+}
+
+void ui_set_view(int view)
+{
+    s_view = view;
+    const char *nm = view == 0 ? "40mhz" : view == 1 ? "ism" : "overview";
+    lv_label_set_text(s_lbl_mode, nm);
+    apply_visibility();
+    if (view != 0) {
+        int lo = view == 1 ? 2400 : 100;
+        int hi = view == 1 ? 2484 : 3000;
+        char b[20];
+        snprintf(b, sizeof(b), "%d", lo);
+        lv_label_set_text(s_ax_left, b);
+        snprintf(b, sizeof(b), "%d", (lo + hi) / 2);
+        lv_label_set_text(s_ax_mid, b);
+        snprintf(b, sizeof(b), "%d", hi);
+        lv_label_set_text(s_ax_right, b);
+    }
+}
+
+void ui_overview_update(const float *db, int n)
+{
+    if (s_view == 0 || !s_ovw_chart) return;
+    for (int j = 0; j < PLOT_W && j < n; j++) {
+        float v = db[j];
+        if (v < DB_MIN) v = DB_MIN;
+        if (v > DB_MAX) v = DB_MAX;
+        int y = (int)((v - DB_MIN) * (1000.0f / (DB_MAX - DB_MIN)));
+        s_ovw_ser->y_points[j] = (lv_coord_t)y;
+    }
+    lv_chart_refresh(s_ovw_chart);
 }
 
 static int bin_for_column(int x, int n)
@@ -346,19 +421,21 @@ void ui_update(const float *db, int n, unsigned freq_mhz, int sample_rate_msps,
     snprintf(buf, sizeof(buf), "FPS:%d", fps);
     lv_label_set_text(s_lbl_f, buf);
 
-    int span = sample_rate_msps / 2;
-    int lo = (int)freq_mhz - span;
-    int hi = (int)freq_mhz + span;
-    if (lo < 0) lo = 0;
-    char l[24];
-    snprintf(l, sizeof(l), "%d", lo);
-    lv_label_set_text(s_ax_left, l);
-    snprintf(l, sizeof(l), "%u", freq_mhz);
-    lv_label_set_text(s_ax_mid, l);
-    snprintf(l, sizeof(l), "%d", hi);
-    lv_label_set_text(s_ax_right, l);
+    if (s_view == 0) {
+        int span = sample_rate_msps / 2;
+        int lo = (int)freq_mhz - span;
+        int hi = (int)freq_mhz + span;
+        if (lo < 0) lo = 0;
+        char l[24];
+        snprintf(l, sizeof(l), "%d", lo);
+        lv_label_set_text(s_ax_left, l);
+        snprintf(l, sizeof(l), "%u", freq_mhz);
+        lv_label_set_text(s_ax_mid, l);
+        snprintf(l, sizeof(l), "%d", hi);
+        lv_label_set_text(s_ax_right, l);
+    }
 
-    if (s_mode == 0 && s_chart) {
+    if (s_view == 0 && s_mode == 0 && s_chart) {
         int ymin = 1 << 20, ymax = -(1 << 20), xmin = PLOT_W, xmax = -1;
         for (int x = 0; x < PLOT_W; x++) {
             float v = db[bin_for_column(x, n)];

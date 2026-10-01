@@ -36,14 +36,15 @@ uv pip install --python .venv/bin/python platformio
 - **片上 FFT**：512 点复数 FFT（radix-2 + Hann 窗 + dBFS），`main/fft.c`，无外部 DSP 依赖。
   每次采集先**减均值做 DC removal**，消除零中频的中央 DC 尖峰。
   （320 px 宽的显示用 512 点即可平滑；256 点会出现台阶。）
-- **两种显示模式**（长按屏幕切换）：
-  - **频谱模式**：`lv_chart` 折线，中心为 DC，跨度 = 采样率（±20 MHz @ 40 MS/s）；
-    底部显示绝对频率刻度（左/中/右 = center∓span / center），**纵向频率网格线随调谐水平滚动**。
-  - **瀑布模式**：全幅 320×174 时间-频谱图，turbo 配色，新帧从顶部插入、整体下移；
-    用 LVGL 8 位索引 canvas（≈57 KB）。
+- **显示模式**（底部模式按钮循环 `40mhz → ism → overview`）：
+  - **40mhz**：普通频谱/瀑布（40 MHz 跨度，中心为 DC；长按切频谱↔瀑布）；
+    底部显示绝对频率刻度，纵向频率网格线随调谐水平滚动。
+  - **ism**：2400–2484 MHz 扫描概览（40 MHz 窗口、20 MHz 步长、max-hold）。
+  - **overview**：100–3000 MHz 全段扫描概览（40 MHz 窗口、30 MHz 步长、max-hold）。
+  - 瀑布模式：全幅 320×168 时间-频谱图，turbo 配色，新帧顶部插入；用 LVGL 8 位索引 canvas（≈54 KB）。
 - **触摸交互**（FT6336U 注册为 LVGL 指针 indev；注意触摸轴与显示相差 180°，在 `read_cb` 里翻转）：
   - 点**标题**（当前频率）→ 弹出**数字键盘**，输入中心频率后 OK
-  - 底部状态条是真正的 `lv_btn`：点 `N:` 循环 FFT 点数 128/256/512/1024；点 `G:` 切 AGC/手动；点 `FPS:` 循环采集档位 5/10/20/40
+  - 底部状态条是真正的 `lv_btn`：点 `N` 循环 FFT 点数 128/256/512/1024；点 `AGC` 切 AGC/手动；点 `10fps` 循环采集档位 5/10/20/40；点 `40mhz/ism/overview` 切换显示模式
   - **图表区**手势（自定义，仅在图表区生效）：长按切频谱/瀑布、左右拖动调谐、上下拖动增益
 - **最宽模拟带宽**：启动时 `s3_set_bandwidth_mhz(0)`。
 - **保持 esp-sdr 协议**：USB Serial/JTAG 上的 burst CLI（`INFO`/`CAPS`/`CAP20`/`RXRUN`/`FREQ`/`GAIN`/`BANDWIDTH` …），gnuradio 客户端

@@ -11,9 +11,17 @@ typedef struct {
     void (*cycle_n)(void);        /* N button: next FFT size */
     void (*toggle_gain)(void);    /* G button: AGC <-> manual */
     void (*cycle_fps)(void);      /* FPS button: next capture tier */
+    void (*cycle_view)(void);     /* MODE button: 40mhz -> ism -> overview */
     void (*set_freq)(unsigned mhz); /* keypad OK */
 } ui_actions_t;
 void ui_set_actions(const ui_actions_t *a);
+
+/* Display view: 0 = normal ("40mhz"), 1 = ISM sweep, 2 = full overview sweep. */
+void ui_set_view(int view);
+int  ui_get_view(void);
+
+/* Push a sweep result: n == 320 overview bins in dB. */
+void ui_overview_update(const float *db, int n);
 
 /* mode: 0 = spectrum line chart, 1 = waterfall. */
 void ui_set_mode(int mode);
