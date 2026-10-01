@@ -81,31 +81,57 @@ static void act_cycle_view(void)
 }
 
 /* Sweep [start,stop] MHz with 40 MHz windows, max-hold into 320 bins. */
+static void sweep_window(int c, int n, float bin_mhz, int start, int stop, float *ovw)
+{
+    s3_set_frequency_mhz((unsigned)c);
+    esp_rom_delay_us(200);            /* PLL settle */
+    static float spec[FFT_MAX];
+    if (!s3_rf_capture(n, FFT_RATE_DIV)) return;
+    dsp_fft_iq(s3_iq_words(), spec);
+    for (int k = 0; k < n; k++) {
+        int off = (k <= n / 2) ? k : k - n;
+        float f = (float)c + (float)off * bin_mhz;
+        int j = (int)((f - (float)start) * (float)OVW_BINS / (float)(stop - start));
+        if (j >= 0 && j < OVW_BINS && spec[k] > ovw[j]) ovw[j] = spec[k];
+    }
+}
+
 static void sweep_once(int view, float *ovw)
 {
     int start = (view == 1) ? 2400 : 100;
     int stop = (view == 1) ? 2484 : 3000;
     const int span = 40;
-    const int step = (view == 1) ? 20 : 30;
+    /* Small step: every frequency must fall in the flat middle of some window,
+     * otherwise the DC-removal notch at each window centre shows as a dark
+     * stripe (and the window edges are rolled off by the analog filter). */
+    const int step = 10;
     int n = g_fft_n;
     float bin_mhz = (float)FFT_RATE_MSPS / (float)n;
-    static float spec[FFT_MAX];
+    static float filled[OVW_BINS];
     if (dsp_fft_size() != n) return;
 
     for (int j = 0; j < OVW_BINS; j++) ovw[j] = -120.0f;
-    for (int c = start + span / 2; c <= stop - span / 2; c += step) {
+
+    int c0 = start + span / 2;
+    int c1 = stop - span / 2;
+    for (int c = c0; ; ) {
         if (g_view != view) return;   /* view changed mid-sweep */
-        s3_set_frequency_mhz((unsigned)c);
-        esp_rom_delay_us(200);        /* PLL settle */
-        if (!s3_rf_capture(n, FFT_RATE_DIV)) continue;
-        dsp_fft_iq(s3_iq_words(), spec);
-        for (int k = 0; k < n; k++) {
-            int off = (k <= n / 2) ? k : k - n;
-            float f = (float)c + (float)off * bin_mhz;
-            int j = (int)((f - (float)start) * (float)OVW_BINS / (float)(stop - start));
-            if (j >= 0 && j < OVW_BINS && spec[k] > ovw[j]) ovw[j] = spec[k];
-        }
+        sweep_window(c, n, bin_mhz, start, stop, ovw);
+        if (c >= c1) break;
+        c += step;
+        if (c > c1) c = c1;           /* always cover the right edge */
     }
+
+    /* Fill narrow notches (window-centre DC dips) from neighbours. */
+    filled[0] = ovw[0];
+    filled[OVW_BINS - 1] = ovw[OVW_BINS - 1];
+    for (int j = 1; j < OVW_BINS - 1; j++) {
+        float m = ovw[j - 1];
+        if (ovw[j] > m) m = ovw[j];
+        if (ovw[j + 1] > m) m = ovw[j + 1];
+        filled[j] = m;
+    }
+    memcpy(ovw, filled, sizeof(filled));
 }
 
 /* ---- RF capture / FFT / sweep task (core 0) ---- */
@@ -196,6 +222,7 @@ static void ui_task(void *arg)
             seen_ovw = s_ovw_seq;
             xSemaphoreGive(s_spec_lock);
             ui_overview_update(ovw, OVW_BINS);
+            if (ui_get_mode() == 1) ui_waterfall_push(ovw, OVW_BINS, 0);
         }
 
         int64_t now = esp_timer_get_time();
@@ -217,8 +244,7 @@ static void ui_task(void *arg)
                 int dpy = 239 - ty;   /* display coords */
                 on_ui = ui_keypad_active() || dpy < CHART_Y0 || dpy > CHART_Y1;
             } else if (!on_ui) {
-                if (ui_get_view() == 0 && !lp_fired && gmode == 0 &&
-                    (now - press_t0) > 600000 &&
+                if (!lp_fired && gmode == 0 && (now - press_t0) > 600000 &&
                     abs(tx - gsx) < 12 && abs(ty - gsy) < 12) {
                     ui_set_mode(ui_get_mode() ? 0 : 1);
                     lp_fired = true;

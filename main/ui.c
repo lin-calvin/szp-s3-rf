@@ -334,20 +334,20 @@ int ui_get_view(void) { return s_view; }
 
 static void apply_visibility(void)
 {
-    bool chart = (s_view == 0 && s_mode == 0);
-    bool canvas = (s_view == 0 && s_mode == 1);
-    bool ovw = (s_view != 0);
+    bool wf = (s_mode == 1);                       /* waterfall in any view */
+    bool show_chart = (!wf && s_view == 0);        /* spectrum line chart  */
+    bool show_ovw = (!wf && s_view != 0);          /* sweep line chart     */
     if (s_chart) {
-        if (chart) lv_obj_clear_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
+        if (show_chart) lv_obj_clear_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
     }
-    if (s_canvas) {
-        if (canvas) lv_obj_clear_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
-        else lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
-    }
     if (s_ovw_chart) {
-        if (ovw) lv_obj_clear_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
+        if (show_ovw) lv_obj_clear_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
         else lv_obj_add_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (s_canvas) {
+        if (wf) lv_obj_clear_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
     }
     s_prev_center = -1;
 }

@@ -39,8 +39,10 @@ uv pip install --python .venv/bin/python platformio
 - **显示模式**（底部模式按钮循环 `40mhz → ism → overview`）：
   - **40mhz**：普通频谱/瀑布（40 MHz 跨度，中心为 DC；长按切频谱↔瀑布）；
     底部显示绝对频率刻度，纵向频率网格线随调谐水平滚动。
-  - **ism**：2400–2484 MHz 扫描概览（40 MHz 窗口、20 MHz 步长、max-hold）。
-  - **overview**：100–3000 MHz 全段扫描概览（40 MHz 窗口、30 MHz 步长、max-hold）。
+  - **ism**：2400–2484 MHz 扫描概览（40 MHz 窗口、10 MHz 步长、max-hold）。
+  - **overview**：100–3000 MHz 全段扫描概览（40 MHz 窗口、10 MHz 步长、max-hold）。
+    （步长取窗口的 1/4：让每个频率都落在某个窗口的平坦中部，避免窗口中心 DC 陷波；并强制包含
+    左右边界窗口，保证覆盖到 stop。）
   - 瀑布模式：全幅 320×168 时间-频谱图，turbo 配色，新帧顶部插入；用 LVGL 8 位索引 canvas（≈54 KB）。
 - **触摸交互**（FT6336U 注册为 LVGL 指针 indev；注意触摸轴与显示相差 180°，在 `read_cb` 里翻转）：
   - 点**标题**（当前频率）→ 弹出**数字键盘**，输入中心频率后 OK
