@@ -477,14 +477,15 @@ void ui_update(const float *db, int n, unsigned freq_mhz, int sample_rate_msps,
     }
 }
 
-void ui_waterfall_push(const float *db, int n, unsigned freq_mhz)
+void ui_waterfall_push(const float *db, int n, unsigned freq_mhz, bool centered)
 {
     (void)freq_mhz;
     if (s_mode != 1 || !s_canvas || !s_wf_buf) return;
     uint8_t *idx = s_wf_buf + 1024;
     memmove(idx + PLOT_W, idx, (size_t)PLOT_W * (PLOT_H - 1));
     for (int x = 0; x < PLOT_W; x++) {
-        float v = db[bin_for_column(x, n)];
+        int b = centered ? bin_for_column(x, n) : (x < n ? x : n - 1);
+        float v = db[b];
         int p = (int)((v - WF_DB_LO) * (255.0f / (WF_DB_HI - WF_DB_LO)));
         if (p < 0) p = 0;
         if (p > 255) p = 255;

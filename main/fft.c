@@ -86,7 +86,7 @@ void dsp_fft_iq(const uint32_t *words, float *out_db)
         if (iv >= 512) iv -= 1024;
         if (qv >= 512) qv -= 1024;
         s_src_re[i] = iv * (1.0f / 512.0f);
-        s_src_im[i] = -qv * (1.0f / 512.0f); /* match the viewer's Q conjugation */
+        s_src_im[i] = qv * (1.0f / 512.0f); /* +Q so +freq is on the right */
         mi += s_src_re[i];
         mq += s_src_im[i];
     }

@@ -224,7 +224,7 @@ static void ui_task(void *arg)
             seen_ovw = s_ovw_seq;
             xSemaphoreGive(s_spec_lock);
             ui_overview_update(ovw, OVW_BINS);
-            if (ui_get_mode() == 1) ui_waterfall_push(ovw, OVW_BINS, 0);
+            if (ui_get_mode() == 1) ui_waterfall_push(ovw, OVW_BINS, 0, false);
         }
 
         int64_t now = esp_timer_get_time();
@@ -290,7 +290,7 @@ static void ui_task(void *arg)
         ui_update(spec, n, freq, FFT_RATE_MSPS, gain, 1000 / g_period_ms);
         if (ui_get_view() == 0 && ui_get_mode() == 1 &&
             (now - last_wf) >= (int64_t)g_period_ms * 1000) {
-            ui_waterfall_push(spec, n, freq);
+            ui_waterfall_push(spec, n, freq, true);
             last_wf = now;
         }
         lv_timer_handler();

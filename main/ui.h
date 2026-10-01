@@ -35,5 +35,7 @@ bool ui_keypad_active(void);
 void ui_update(const float *db, int n, unsigned freq_mhz, int sample_rate_msps,
                int gain, int fps);
 
-/* Push one waterfall line. */
-void ui_waterfall_push(const float *db, int n, unsigned freq_mhz);
+/* Push one waterfall line. centered = the data is a DC-centred spectrum
+ * (40mhz view); otherwise it is already in absolute frequency order
+ * (left = start, right = stop; sweep views). */
+void ui_waterfall_push(const float *db, int n, unsigned freq_mhz, bool centered);
