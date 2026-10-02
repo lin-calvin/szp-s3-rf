@@ -1,6 +1,7 @@
 #include "esp_heap_caps.h"
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
+#include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -49,6 +50,14 @@ static volatile bool s_interactive;
 
 /* View: 0 = normal (40 MHz around centre), 1 = ISM sweep, 2 = full sweep. */
 static volatile int g_view;
+/* Frequency picked by tapping the sweep chart (0 = none); tuned when switching
+ * back to the normal view. */
+static volatile unsigned s_freq_sel;
+
+/* BOOT button (GPIO0) toggles PC mode: on-device capture stops so the serial
+ * burst CLI (gr-esp32 / web viewer) gets exclusive use of the radio. */
+#define PIN_BOOT 0
+static volatile bool g_pc_mode;
 
 #define OVW_BINS 320
 static float s_ovw_shared[OVW_BINS];
@@ -84,6 +93,12 @@ static void act_cycle_view(void)
     /* Sweeps: match the analog filter to the 40 MS/s digital span (40 MHz) to
      * keep out-of-band signals from aliasing in. Normal view: widest. */
     s3_set_bandwidth_mhz(g_view == 0 ? 0 : 40);
+    if (g_view == 0) {
+        ui_set_marker(0, 0);
+        if (s_freq_sel) s3_set_frequency_mhz(s_freq_sel); /* tune to the pick */
+    } else {
+        ui_set_marker(g_view, s_freq_sel);
+    }
 }
 
 /* Sweep [start,stop] MHz with 40 MHz windows, max-hold into 320 bins. */
@@ -120,7 +135,7 @@ static void sweep_once(int view, float *ovw, int n)
     int c0 = start + span / 2;
     int c1 = stop - span / 2;
     for (int c = c0; ; ) {
-        if (g_view != view) return;   /* view changed mid-sweep */
+        if (g_view != view || g_pc_mode) return;   /* aborted / PC mode */
         sweep_window(c, n, bin_mhz, start, stop, ovw);
         if (c >= c1) break;
         c += step;
@@ -149,6 +164,10 @@ static void capture_task(void *arg)
 
     for (;;) {
         s3_cli_poll();
+        if (g_pc_mode) {          /* serial CLI owns the radio */
+            vTaskDelay(pdMS_TO_TICKS(2));
+            continue;
+        }
         int n = (g_view == 0) ? g_fft_n : SWEEP_N;
         if (n != applied_n && dsp_fft_init(n) == 0) {
             applied_n = n;
@@ -205,6 +224,32 @@ static void ui_task(void *arg)
     int n = 512;
 
     for (;;) {
+        int64_t now = esp_timer_get_time();
+        /* BOOT button: GPIO0 is active-low; require a stable 30 ms press and
+         * only toggle once until release (debounced edge, not consecutive-edge count). */
+        static int boot_last = 1, boot_handled;
+        static int64_t boot_down_us, boot_toggle_us;
+        int boot = gpio_get_level(PIN_BOOT);
+        if (boot == 0) {
+            if (boot_last != 0) boot_down_us = now;
+            if (!boot_handled && now - boot_down_us >= 30000 &&
+                now - boot_toggle_us >= 300000) {
+                boot_handled = 1;
+                boot_toggle_us = now;
+                g_pc_mode = !g_pc_mode;
+                ui_set_pc_mode(g_pc_mode);
+                for (int i = 0; i < 8; i++) lv_timer_handler(); /* flush label */
+            }
+        } else {
+            boot_handled = 0;
+        }
+        boot_last = boot;
+
+        if (g_pc_mode) {           /* stop rendering; give the CLI the CPU */
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
         unsigned freq = 2412;
         int gain = -1;
 #if SZP_RF_ENABLE
@@ -229,8 +274,6 @@ static void ui_task(void *arg)
             ui_overview_update(ovw, OVW_BINS);
             if (ui_get_mode() == 1) ui_waterfall_push(ovw, OVW_BINS, 0, false);
         }
-
-        int64_t now = esp_timer_get_time();
 
         /* Chart-area gestures (taps/buttons elsewhere go to LVGL):
          *   long press      -> toggle spectrum/waterfall
@@ -261,15 +304,32 @@ static void ui_task(void *arg)
                     }
                     int dx = tx - glx, dy = ty - gly;
                     if (gmode == 1) {
-                        tune_accum += (float)dx * (float)FFT_RATE_MSPS / 320.0f;
-                        int step = (int)tune_accum;
-                        if (step != 0) {
-                            long f = (long)s3_frequency_mhz() + step;
-                            if (f < 100) f = 100;
-                            if (f > 6000) f = 6000;
-                            s3_set_frequency_mhz((unsigned)f);
-                            freq = (unsigned)f;
-                            tune_accum -= (float)step;
+                        if (g_view != 0) {
+                            /* Sweep views: horizontal drag moves the marker. */
+                            int start = (g_view == 1) ? 2200 : 100;
+                            int stop = (g_view == 1) ? 2700 : 3000;
+                            tune_accum -= (float)dx * (float)(stop - start) / 320.0f;
+                            int step = (int)tune_accum;
+                            if (step != 0) {
+                                long f = (long)(s_freq_sel ? s_freq_sel
+                                                           : (unsigned)((start + stop) / 2)) + step;
+                                if (f < start) f = start;
+                                if (f > stop) f = stop;
+                                s_freq_sel = (unsigned)f;
+                                ui_set_marker(g_view, s_freq_sel);
+                                tune_accum -= (float)step;
+                            }
+                        } else {
+                            tune_accum += (float)dx * (float)FFT_RATE_MSPS / 320.0f;
+                            int step = (int)tune_accum;
+                            if (step != 0) {
+                                long f = (long)s3_frequency_mhz() + step;
+                                if (f < 100) f = 100;
+                                if (f > 6000) f = 6000;
+                                s3_set_frequency_mhz((unsigned)f);
+                                freq = (unsigned)f;
+                                tune_accum -= (float)step;
+                            }
                         }
                     } else if (gmode == 2) {
                         int gmax = (int)s3_gain_max();
@@ -286,11 +346,32 @@ static void ui_task(void *arg)
                 glx = tx;
                 gly = ty;
             }
+        } else if (touching) {
+            /* Short, still press in the sweep chart area = pick a frequency. */
+            int dur = (int)(now - press_t0);
+            if (!lp_fired && dur < 500000 && abs(glx - gsx) < 12 && abs(gly - gsy) < 12 &&
+                g_view != 0) {
+                int dpx = 319 - glx, dpy = 239 - gly;
+                if (dpy >= CHART_Y0 && dpy <= CHART_Y1) {
+                    int start = (g_view == 1) ? 2200 : 100;
+                    int stop = (g_view == 1) ? 2700 : 3000;
+                    long f = start + (long)dpx * (stop - start) / 320;
+                    if (f < 100) f = 100;
+                    if (f > 6000) f = 6000;
+                    s_freq_sel = (unsigned)f;
+                    ui_set_marker(g_view, s_freq_sel);
+                }
+            }
         }
         touching = down;
         s_interactive = down && !on_ui;
 
-        ui_update(spec, n, freq, FFT_RATE_MSPS, gain, 1000 / g_period_ms);
+        unsigned title_freq = freq;
+        if (g_view != 0) {
+            title_freq = s_freq_sel ? s_freq_sel
+                                    : (unsigned)((g_view == 1) ? 2450 : 1550);
+        }
+        ui_update(spec, n, title_freq, FFT_RATE_MSPS, gain, 1000 / g_period_ms);
         if (ui_get_view() == 0 && ui_get_mode() == 1 &&
             (now - last_wf) >= (int64_t)g_period_ms * 1000) {
             ui_waterfall_push(spec, n, freq, true);
@@ -313,6 +394,13 @@ void app_main(void)
     st7789_init();
     lvgl_port_init();
     lvgl_port_add_touch();
+
+    gpio_config_t boot_cfg = {
+        .pin_bit_mask = 1ULL << PIN_BOOT,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    gpio_config(&boot_cfg);
 
     static const ui_actions_t actions = {
         .cycle_n = act_cycle_n,

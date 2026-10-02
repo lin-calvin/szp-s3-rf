@@ -53,7 +53,7 @@ uv pip install --python .venv/bin/python platformio
   - **图表区**手势（自定义，仅在图表区生效）：长按切频谱/瀑布、左右拖动调谐、上下拖动增益
 - **最宽模拟带宽**：启动时 `s3_set_bandwidth_mhz(0)`。
 - **保持 esp-sdr 协议**：USB Serial/JTAG 上的 burst CLI（`INFO`/`CAPS`/`CAP20`/`RXRUN`/`FREQ`/`GAIN`/`BANDWIDTH` …），gnuradio 客户端
-  [`gr-esp32`](/home/calvin/exps/gr-esp32) 仍可直接使用；有主机串流时 FFT 循环自动暂停。
+  [`gr-esp32`](/home/calvin/exps/gr-esp32) 仍可直接使用。按 **BOOT (GPIO0)** 进入 PC mode：屏幕显示居中提示并隐藏正常 UI，片上 capture 停止，USB Serial/JTAG CLI 独占射频；再按 BOOT 返回。
 
 ### 可调参数（`main/main.c`）
 

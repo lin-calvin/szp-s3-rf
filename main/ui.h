@@ -23,6 +23,12 @@ int  ui_get_view(void);
 /* Push a sweep result: n == 320 overview bins in dB. */
 void ui_overview_update(const float *db, int n);
 
+/* Marker line on the sweep chart at freq_mhz (view 1 or 2); 0 clears it. */
+void ui_set_marker(int view, unsigned freq_mhz);
+
+/* PC mode: on-device capture stops, the serial CLI owns the radio. */
+void ui_set_pc_mode(bool on);
+
 /* mode: 0 = spectrum line chart, 1 = waterfall. */
 void ui_set_mode(int mode);
 int  ui_get_mode(void);

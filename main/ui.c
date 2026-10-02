@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "st7789.h"
 
 #define PLOT_W 320
 #define PLOT_H 168
@@ -33,9 +34,16 @@ static lv_obj_t *s_ax_right;
 static lv_obj_t *s_ovw_chart;
 static lv_chart_series_t *s_ovw_ser;
 static int s_view;   /* 0=40mhz, 1=ism, 2=overview */
+static int s_marker_view;
+static unsigned s_marker_mhz;
+static lv_obj_t *s_marker_obj;
+static lv_obj_t *s_marker_inner;
+static bool s_pc_mode;
+static lv_obj_t *s_pc_overlay;
 
 static lv_obj_t *s_kp;        /* keypad overlay */
 static lv_obj_t *s_kp_val;    /* typed value */
+static lv_obj_t *s_pc_overlay;
 static char s_kp_buf[10];
 static int s_kp_len;
 
@@ -47,6 +55,7 @@ static int s_prev_y[PLOT_W];
 static int s_prev_center = -1;
 
 static ui_actions_t s_act;
+static void apply_visibility(void);
 
 void ui_set_actions(const ui_actions_t *a) { s_act = *a; }
 
@@ -241,8 +250,41 @@ static void chart_grid_draw(lv_event_t *e)
     }
 }
 
-/* ---------------- init ---------------- */
+static void ovw_range(int view, int *lo, int *hi)
+{
+    *lo = (view == 1) ? 2200 : 100;
+    *hi = (view == 1) ? 2700 : 3000;
+}
 
+/* Marker line on the sweep chart at the selected frequency. */
+void ui_set_pc_mode(bool on)
+{
+    s_pc_mode = on;
+    if (!s_pc_overlay) return;
+    if (on) lv_obj_clear_flag(s_pc_overlay, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(s_pc_overlay, LV_OBJ_FLAG_HIDDEN);
+    apply_visibility();
+}
+
+void ui_set_marker(int view, unsigned freq_mhz)
+{
+    s_marker_view = view;
+    s_marker_mhz = freq_mhz;
+    if (!s_marker_obj) return;
+    int lo, hi;
+    ovw_range(view, &lo, &hi);
+    if (!freq_mhz) {
+        lv_obj_add_flag(s_marker_obj, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    int x = (int)((long)((int)freq_mhz - lo) * PLOT_W / (hi - lo));
+    if (x < 0) x = 0;
+    if (x > PLOT_W - 3) x = PLOT_W - 3;
+    lv_obj_set_pos(s_marker_obj, x, PLOT_Y);
+    lv_obj_clear_flag(s_marker_obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+/* ---------------- init ---------------- */
 void ui_init(void)
 {
     lv_obj_t *scr = lv_scr_act();
@@ -308,6 +350,29 @@ void ui_init(void)
     s_ovw_ser = lv_chart_add_series(s_ovw_chart, lv_color_hex(0xff9040), LV_CHART_AXIS_PRIMARY_Y);
     lv_obj_add_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
 
+    /* Marker line for the tapped frequency: black bar with a white core so it
+     * is visible on the turbo waterfall as well as the line chart. */
+    s_marker_obj = lv_obj_create(scr);
+    lv_obj_set_size(s_marker_obj, 3, PLOT_H);
+    lv_obj_set_pos(s_marker_obj, 0, PLOT_Y);
+    lv_obj_set_style_bg_color(s_marker_obj, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(s_marker_obj, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_marker_obj, 0, 0);
+    lv_obj_set_style_radius(s_marker_obj, 0, 0);
+    lv_obj_set_style_pad_all(s_marker_obj, 0, 0);
+    lv_obj_clear_flag(s_marker_obj, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(s_marker_obj, LV_OBJ_FLAG_HIDDEN);
+
+    s_marker_inner = lv_obj_create(s_marker_obj);
+    lv_obj_set_size(s_marker_inner, 1, PLOT_H);
+    lv_obj_set_pos(s_marker_inner, 1, 0);
+    lv_obj_set_style_bg_color(s_marker_inner, lv_color_hex(0xffffff), 0);
+    lv_obj_set_style_bg_opa(s_marker_inner, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_marker_inner, 0, 0);
+    lv_obj_set_style_radius(s_marker_inner, 0, 0);
+    lv_obj_set_style_pad_all(s_marker_inner, 0, 0);
+    lv_obj_clear_flag(s_marker_inner, LV_OBJ_FLAG_SCROLLABLE);
+
     s_ax_left = lv_label_create(scr);
     lv_obj_set_style_text_color(s_ax_left, lv_color_hex(0x8090a0), 0);
     lv_obj_set_style_text_font(s_ax_left, &lv_font_montserrat_10, 0);
@@ -325,6 +390,24 @@ void ui_init(void)
     lv_obj_align(s_ax_right, LV_ALIGN_TOP_RIGHT, -2, 220);
 
     keypad_init(scr);
+
+    /* Opaque, centered PC-mode notice; normal UI is hidden while the host owns
+     * the radio so LVGL/SPI cannot slow down the serial client. */
+    s_pc_overlay = lv_obj_create(scr);
+    lv_obj_set_size(s_pc_overlay, ST7789_W, ST7789_H);
+    lv_obj_set_pos(s_pc_overlay, 0, 0);
+    lv_obj_set_style_bg_color(s_pc_overlay, lv_color_hex(0x101820), 0);
+    lv_obj_set_style_bg_opa(s_pc_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_pc_overlay, 0, 0);
+    lv_obj_set_style_radius(s_pc_overlay, 0, 0);
+    lv_obj_clear_flag(s_pc_overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *pc_label = lv_label_create(s_pc_overlay);
+    lv_obj_set_style_text_color(pc_label, lv_color_hex(0x00e0ff), 0);
+    lv_obj_set_style_text_font(pc_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(pc_label, "PC MODE\nUSB Serial-JTAG\nPress BOOT to exit");
+    lv_obj_center(pc_label);
+    lv_obj_add_flag(s_pc_overlay, LV_OBJ_FLAG_HIDDEN);
+
     ui_set_mode(0);
     ui_set_view(0);
 }
@@ -334,6 +417,32 @@ int ui_get_view(void) { return s_view; }
 
 static void apply_visibility(void)
 {
+    if (s_pc_mode) {
+        lv_obj_add_flag(s_title, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_lbl_n, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_lbl_g, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_lbl_f, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_lbl_mode, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_ax_left, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_ax_mid, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_ax_right, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_kp, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_chart, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_canvas, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_ovw_chart, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_marker_obj, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_obj_clear_flag(s_title, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_lbl_n, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_lbl_g, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_lbl_f, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_lbl_mode, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_ax_left, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_ax_mid, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_ax_right, LV_OBJ_FLAG_HIDDEN);
+
     bool wf = (s_mode == 1);                       /* waterfall in any view */
     bool show_chart = (!wf && s_view == 0);        /* spectrum line chart  */
     bool show_ovw = (!wf && s_view != 0);          /* sweep line chart     */
@@ -407,8 +516,12 @@ void ui_update(const float *db, int n, unsigned freq_mhz, int sample_rate_msps,
     s_span_mhz = sample_rate_msps;
 
     char buf[24];
-    snprintf(buf, sizeof(buf), "%u MHz", freq_mhz);
-    lv_label_set_text(s_title, buf);
+    if (s_pc_mode) {
+        lv_label_set_text(s_title, "PC MODE");
+    } else {
+        snprintf(buf, sizeof(buf), "%u MHz", freq_mhz);
+        lv_label_set_text(s_title, buf);
+    }
 
     snprintf(buf, sizeof(buf), "N:%d", n);
     lv_label_set_text(s_lbl_n, buf);
